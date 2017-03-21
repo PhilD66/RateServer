@@ -23,8 +23,9 @@ import javax.websocket.Endpoint;
 import javax.websocket.server.ServerApplicationConfig;
 import javax.websocket.server.ServerEndpointConfig;
 
-import websocket.drawboard.DrawboardEndpoint;
-import websocket.echo.EchoEndpoint;
+//import websocket.drawboard.DrawboardEndpoint;
+//import websocket.echo.EchoEndpoint;
+import uk.co.eskabe.RateServer.RateServer;
 
 public class ExamplesConfig implements ServerApplicationConfig {
 
@@ -33,7 +34,7 @@ public class ExamplesConfig implements ServerApplicationConfig {
             Set<Class<? extends Endpoint>> scanned) {
 
         Set<ServerEndpointConfig> result = new HashSet<ServerEndpointConfig>();
-
+/*
         if (scanned.contains(EchoEndpoint.class)) {
             result.add(ServerEndpointConfig.Builder.create(
                     EchoEndpoint.class,
@@ -45,11 +46,11 @@ public class ExamplesConfig implements ServerApplicationConfig {
                     DrawboardEndpoint.class,
                     "/websocket/drawboard").build());
         }
-
+*/
         if (scanned.contains(RateServer.class)) {
             result.add(ServerEndpointConfig.Builder.create(
-                    DrawboardEndpoint.class,
-                    "/websocket/rateserver").build());
+                    RateServer.class,
+                    "/websocket/rateServer").build());
         }
 
         return result;
