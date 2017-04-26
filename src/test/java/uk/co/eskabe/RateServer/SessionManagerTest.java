@@ -81,7 +81,7 @@ public class SessionManagerTest
         // and connect is invoked with a good test username and password...
         UUID sessionHandle = sMan.connect("sauron", "of-mordor");
         // When we suscribe for an fxRate, no error is returned...
-        assertFalse( sMan.subscribe(sessionHandle, "GBPUSD") == -1 );
+        assertFalse( sMan.subscribe(sessionHandle, "spot", "GBPUSD") == -1 );
         // such that the result value is not -1.
     }
         

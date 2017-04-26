@@ -1,7 +1,9 @@
 package uk.co.eskabe.RateServer;
 
-import org.json.JSONObject;
-import org.json.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.JSONArray;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
 
 /**
  * AuthService
@@ -16,18 +18,27 @@ public class AuthService {
         //
     }
 
-    public long isAuthenticated( String username, String password ) {
+    public long isAuthenticated( String suppliedUsername, String suppliedPassword ) {
         // Basic parameter validation...
-        if ( (username != null) && (username.length() > 0) && (password != null) && (password.length() > 0) ) {
-            if ( username.compareToIgnoreCase("test") + password.compareToIgnoreCase("password") == 0 ) {
+        if ( (suppliedUsername != null) && (suppliedUsername.length() > 0) && (suppliedPassword != null) && (suppliedPassword.length() > 0) ) {
+            if ( suppliedUsername.compareToIgnoreCase("test") + suppliedPassword.compareToIgnoreCase("password") == 0 ) {
                 return 0;
             } else {
-                JSONObject userDB = new JSONObject(testDB);
-                JSONArray arrUsers = userDB.getJSONArray("users");
-                for (int i = 0; i < arrUsers.length(); i++) {
-                    JSONObject userObject = arrUsers.getJSONObject(i);
-                    if ( userObject.getString("username").compareTo(username) + userObject.getString("password").compareTo(password) == 0 ) {
-                        return userObject.getLong("uniqueID");
+                JSONParser parser = new JSONParser();
+                JSONObject userDB;
+                try {
+                    userDB = (JSONObject) parser.parse(testDB);
+                } catch (ParseException pEx) {
+                    return -1;
+                }
+
+                JSONArray arrUsers = (JSONArray)userDB.get("users");
+                for (int i = 0; i < arrUsers.size(); i++) {
+                    JSONObject userObject = (JSONObject)arrUsers.get(i);
+                    String strUsername = userObject.get("username").toString();
+                    String strPassword = userObject.get("password").toString();
+                    if ( (strUsername.compareTo(suppliedUsername) == 0) && (strPassword.compareTo(suppliedPassword) == 0) ) {
+                        return Long.valueOf(userObject.get("uniqueID").toString()).longValue();
                     }
                 }
                 // TBD - This is where the authentication needs to go.

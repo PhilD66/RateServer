@@ -33,10 +33,15 @@ public class SessionManager {
     }
     
     public long disconnect( UUID sessionHandle ) {
-        return -1;
+        SessionObject sessionObj = sessionTable.remove( sessionHandle );
+        if ( sessionObj != null ) {
+            return 1;
+        } else {
+            return -1;
+        }
     }
     
-    public long subscribe( UUID sessionHandle, String fxPair ) {
+    public long subscribe( UUID sessionHandle, String instrument, String fxPair ) {
         SessionObject thisSession = sessionTable.get(sessionHandle);
         if ( thisSession != null ) {
             return 1;
@@ -45,7 +50,7 @@ public class SessionManager {
         }
     } 
     
-    public long unsubscribe( UUID sessionHandle, String fxPair ) {
+    public long unsubscribe( UUID sessionHandle, String instrument, String fxPair ) {
         SessionObject thisSession = sessionTable.get(sessionHandle);
         if ( thisSession != null ) {
             return 1;
