@@ -12,6 +12,7 @@
 
 package uk.co.eskabe.RateServer;
 
+import javax.jms.Session;
 import java.net.*;
 import java.util.ArrayList;
 
@@ -30,15 +31,25 @@ class RateServer implements ClientEventListener
 		main.run(6789 );
 	}
 
+	/*
+	 * The run method creates the three main components of the RateServer:
+	 * - SessionManager : Manages the active client session.
+	 * - ClientConnection : One per socket connection into the server.
+	 * - RateEventEngine : Generates the rate updates for all the FX rates.
+	 */
 	public void run( int port ) throws Exception {
 
-		ServerSocket welcomeSocket = new ServerSocket(port);
+        RateEventEngine rateEngine = new RateEventEngine();
+        rateEngine.start();
+
+        ServerSocket welcomeSocket = new ServerSocket(port);
+        SessionManager sessionManager = SessionManager.getInstance(rateEngine);
 
 		while( true ) {
 			Socket connectionSocket = welcomeSocket.accept();
 			connectionSocket.setTcpNoDelay(true);
 
-            ClientConnection newClient	= new ClientConnection(this, connectionSocket);
+            ClientConnection newClient	= new ClientConnection(this, connectionSocket, sessionManager);
 			clientConections.add(newClient);
 			newClient.start();
 			System.out.println( "There are " + String.valueOf(clientConections.size()) + " clients connected.");
@@ -58,10 +69,10 @@ class RateServer implements ClientEventListener
      * Implementation of ClientEventListener interface onConnectionClosed method.
      * This method is called when the remote client closes the socket or by ClientConnection
      * if there is a protocol error or horrible exception.
-     * @param listener - The ClientEventListener object that needs to be removed from the list.
+     * @param connector - The ClientConnection object that needs to be removed from the list.
      */
-	public void onConnectionClosed(ClientEventListener listener) {
-        clientConections.remove(listener);
+	public void onConnectionClosed(ClientConnection connector) {
+        clientConections.remove(connector);
         System.out.println( "There are " + String.valueOf(clientConections.size()) + " clients connected.");
     }
 

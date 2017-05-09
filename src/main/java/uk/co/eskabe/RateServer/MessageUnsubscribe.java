@@ -1,9 +1,9 @@
 package uk.co.eskabe.RateServer;
 
 /**
- * Created by Phil on 25/04/2017.
+ * Created by Phil on 26/04/2017.
  */
-public class MessageSubscribe extends MessageBase {
+public class MessageUnsubscribe extends MessageBase {
 
     public class Parameters extends ParameterBase {
         String sessionId = "";
@@ -17,12 +17,12 @@ public class MessageSubscribe extends MessageBase {
         }
     }
 
-    public String verb = "subscribe";
-    protected MessageSubscribe.Parameters params = new MessageSubscribe.Parameters("", "", "");
+    public String verb = "unsubscribe";
+    protected MessageUnsubscribe.Parameters params = new MessageUnsubscribe.Parameters("", "", "");
 
-    public MessageSubscribe() {}
+    public MessageUnsubscribe() {}
 
-    public MessageSubscribe( String useSessionId, String strInstrument, String strFxPair ) {
+    public MessageUnsubscribe( String useSessionId, String strInstrument, String strFxPair ) {
         params.sessionId = useSessionId;
         params.instrument = strInstrument;
         params.fxPair = strFxPair;

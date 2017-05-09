@@ -33,7 +33,34 @@ public class RateServerTest extends TestCase {
      */
     public void testSocketConnection() throws IOException {
 
-        //RateClient rateClient = new RateClient();
-        assertTrue( true );
+        boolean runsOK = false;
+
+        RateServer rateServer = new RateServer();
+        try {
+            System.out.println("Rate server spinning up...");
+
+            (new Thread() {
+                public void run() {
+                    try {
+                        rateServer.run(6789);
+                    } catch (Exception ex) {
+                        System.out.println("Serious exception encountered launching the server: " + ex.toString());
+                        assertTrue(false);
+                    }
+                }
+            }).start();
+
+            RateClient rateClient = new RateClient();
+
+            System.out.println("Prepping to run a series of client tests messaging the server...");
+            rateClient.run(6789);
+
+            System.out.println("All looks good.");
+            runsOK = true;
+        } catch (Exception ex) {
+            System.out.println("Something went wrong during the test: " + ex.toString());
+        }
+
+        assertTrue( runsOK );
     }
 }

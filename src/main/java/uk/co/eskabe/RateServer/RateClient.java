@@ -9,6 +9,8 @@
 
 package uk.co.eskabe.RateServer;
 
+import org.json.simple.parser.ParseException;
+
 import java.io.*;
 import java.net.*;
 import java.util.*;
@@ -20,12 +22,19 @@ import java.util.zip.GZIPOutputStream;
 
 public class RateClient implements ClientEventListener
 {
+    private static int SM_ERROR = -1;
+    private static int SM_DISCONNECTED = 0;
+    private static int SM_CONNECTED = 1;
+    private static int SM_SUBSCRIBED = 2;
+
     Socket clientSocket = null;
+    String strSessionId = "";
     static final int COMPRESSION_NONE = 0;
     static final int COMPRESSION_DEFLATE = 1;
     static final int COMPRESSION_GZIP = 2;
     protected int compression = COMPRESSION_NONE;
     protected boolean bMask = true;
+    private int stateMachine = SM_DISCONNECTED;
 
 	public RateClient() throws IOException {
         clientSocket = new Socket("127.0.0.1", 6789);
@@ -38,9 +47,53 @@ public class RateClient implements ClientEventListener
 		main.run(6789 );
 	}
 
+	public void setupToReceiveMessages() {
+	    try {
+            // Then wait for it to send something back.
+            InputStream iStr = clientSocket.getInputStream();
+
+            (new Thread() {
+                public void run() {
+                    String response = extractMessage(iStr);
+                    System.out.println("Received: " + response);
+                    MessageDecoder msgDecoder = new MessageDecoder();
+                    try {
+                        msgDecoder.readIn(response);
+                        if ( msgDecoder.isConnect() ) {
+                            MessageConnect connectResponse = new MessageConnect();
+                            connectResponse.readIn(response);
+                            strSessionId = connectResponse.getSessionId();
+                            stateMachine = SM_CONNECTED;
+                        } else if ( msgDecoder.isSubscribe() ) {
+                            stateMachine = SM_SUBSCRIBED;
+                        } else if ( msgDecoder.isUnsubscribe() ) {
+                            stateMachine = SM_CONNECTED;
+                        } else if ( msgDecoder.isDisconnect() ) {
+                            stateMachine = SM_DISCONNECTED;
+                        } else if ( msgDecoder.isError() ) {
+                            MessageGeneralError errorResponse = new MessageGeneralError();
+                            errorResponse.readIn(response);
+                            System.out.println("Server signals error! Error: " + errorResponse.params.error + " -> " + errorResponse.params.detail);
+                        }
+                    } catch( JsonSerializerException jsEx ) {
+                        System.out.println("JsonSerializerException on message: " + response);
+                    } catch( ParseException pEx ) {
+                        System.out.println("ParseException on message: " + response);
+                    }
+                }
+            }).start();
+
+        } catch( IOException ioEx ) {
+            System.out.println(ioEx.toString());
+        }
+    }
+
 	public void run( int port ) throws Exception {
 
-	    try {
+	    // Start the thread to read inbound messages.
+        setupToReceiveMessages();
+
+        try {
 
             doHeaderExchange();
 
@@ -49,28 +102,39 @@ public class RateClient implements ClientEventListener
             String strMessage = msgConnect.writeOut();
             sendMessage(strMessage, clientSocket.getOutputStream());
 
-            // Then wait for it to send something back.
-            InputStream iStr = clientSocket.getInputStream();
-
-            String response = extractMessage(iStr);
-            System.out.println("Received: " + response);
-            MessageConnectResponse connectResponse = new MessageConnectResponse();
-            try {
-                connectResponse.readIn(response);
-
-                // Now subscribe to an FX rate stream...
-                MessageSubscribe msgSubcribe = new MessageSubscribe( connectResponse.params.sessionId,"SPOT", "EURGBP");
-                strMessage = msgSubcribe.writeOut();
-                sendMessage(strMessage, clientSocket.getOutputStream());
-
-                response = extractMessage(iStr);
-                System.out.println("Received: " + response);
-
-            } catch ( JsonSerializerException jsEx ) {
-                MessageGeneralError errorResponse = new MessageGeneralError();
-                errorResponse.readIn(response);
-                System.out.println("Server signals error! Error: " + errorResponse.params.error + " -> " + errorResponse.params.detail);
+            while ( stateMachine != SM_CONNECTED ) {
+                Thread.sleep(10);
             }
+
+            // Now subscribe to an FX rate stream...
+            MessageSubscribe msgSubcribe = new MessageSubscribe( strSessionId,"SPOT", "EURGBP");
+            strMessage = msgSubcribe.writeOut();
+            sendMessage(strMessage, clientSocket.getOutputStream());
+
+            while ( stateMachine != SM_SUBSCRIBED ) {
+                Thread.sleep(10);
+            }
+
+            MessageUnsubscribe msgUnsubscribe = new MessageUnsubscribe(strSessionId, "SPOT", "EURGBP");
+            strMessage = msgUnsubscribe.writeOut();
+            sendMessage(strMessage, clientSocket.getOutputStream());
+
+            while ( stateMachine == SM_SUBSCRIBED ) {
+                Thread.sleep(10);
+            }
+
+            MessageDisconnect msgDisconnect = new MessageDisconnect(strSessionId);
+            strMessage = msgDisconnect.writeOut();
+            sendMessage(strMessage, clientSocket.getOutputStream());
+
+            while ( stateMachine == SM_CONNECTED ) {
+                Thread.sleep(10);
+            }
+
+            final int CLOSE_NORMAL = 1000;
+            sendSocketClose(clientSocket.getOutputStream(), CLOSE_NORMAL);
+            Thread.sleep(50);
+            clientSocket.close();
 
         } catch (IOException ioEx ) {
 	        System.out.println(ioEx.toString());
@@ -123,7 +187,7 @@ public class RateClient implements ClientEventListener
 
     }
 
-	public void onConnectionClosed(ClientEventListener listener) {
+	public void onConnectionClosed(ClientConnection connection) {
         //clientConections.remove(listener);
         //System.out.println( "There are " + String.valueOf(clientConections.size()) + " clients connected.");
     }
@@ -184,7 +248,7 @@ public class RateClient implements ClientEventListener
                 payload[maxHeaderLength - headerLength + 2] = (byte)(actualPayloadLength >> 8);
                 payload[maxHeaderLength - headerLength + 3] = (byte)actualPayloadLength;
             } else {
-                throw new Exception("Uncoded handling for large messages!");
+                throw new Exception("Handling for large messages not yet coded!");
             }
 
             if ( bMask ) {
@@ -394,5 +458,14 @@ public class RateClient implements ClientEventListener
         }
 
         return message;
+    }
+
+    public void sendSocketClose(OutputStream streamOut, int closeCode) throws IOException {
+	    byte frame[] = new byte[4];
+	    frame[0] = (byte)0x88;
+	    frame[1] = (byte)0x02;
+	    frame[2] = (byte)(closeCode >> 8);
+	    frame[3] = (byte)(closeCode);
+        streamOut.write(frame, 0, 4);
     }
 }

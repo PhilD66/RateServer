@@ -15,7 +15,7 @@ import java.lang.reflect.Modifier;
  */
 public class JsonSerializerBase {
 
-    private transient int internalNoPrintCount = 0;
+    private int internalNoPrintCount = 0;
 
     public JsonSerializerBase() {
 
@@ -96,7 +96,8 @@ public class JsonSerializerBase {
                         }
                     }
                 }
-                oClass = null; //oClass.getSuperclass();
+                //oClass = null;
+                oClass = oClass.getSuperclass();
             }
             buffer.append(tabs.toString());
             buffer.append("}\n");

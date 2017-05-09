@@ -35,6 +35,7 @@ public class WebSocketMessageHandler {
     public int waitForMessage() throws WebsocketProtocolException, IOException {
 
         byte buffer[] = new byte[10];
+        payloadLength = 0;
 
         // Read only 2 bytes which is the minimum raw header
         int bytesRead = inputStream.read(buffer, 0, 2);
@@ -163,7 +164,7 @@ public class WebSocketMessageHandler {
     public void sendMessage(String rxMessage) {
         // Do something with the message here...
 
-        System.out.println("Message to server is: " + rxMessage);
+        System.out.println("Message back to client is: " + rxMessage);
 
         // Turn the raw message into the payload (which may or may not be zipped).
         try {

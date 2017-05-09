@@ -17,16 +17,18 @@ import java.util.UUID;
  * Created by Phil on 20/04/2017.
  * This class handles the top level websocket comms.
  */
-public class ClientConnection extends Thread {
+public class ClientConnection extends Thread implements RateUpdateListener {
     private ClientEventListener eventListener = null;
     private Socket connection = null;
-    private SessionManager sessionManager = SessionManager.getInstance();
+    private SessionManager sessionManager = null;
     private WebSocketMessageHandler wsMessageHandler = null;
     protected boolean bOpen = false;
+    protected String strSessionId = "";
 
-    public ClientConnection( ClientEventListener server, Socket myConnection ) {
+    public ClientConnection( ClientEventListener server, Socket myConnection, SessionManager useSessionManager ) {
         eventListener = server;
         connection = myConnection;
+        sessionManager = useSessionManager;
         bOpen = true;
     }
 
@@ -71,32 +73,34 @@ public class ClientConnection extends Thread {
                 while (bOpen) {
 
                     int msg = wsMessageHandler.waitForMessage();
-                    switch( msg ) {
-                        case 8:
-                            int errorCode = wsMessageHandler.getErrorCode();
-                            String errorMsg = wsMessageHandler.getTextMessage();
-                            System.out.println(errorMsg);
-                            internalOnclose();
-                            bOpen = false;
-                            break;
-                        case 1:
-                            try {
-                                String message = wsMessageHandler.getTextMessage();
-                                internalOnMessage(message);
-                            } catch ( Exception ex ) {
-                                wsMessageHandler.sendMessage(MessageTranslator.formatGeneralError("ERROR", ex.toString()));
-                            }
-                            break;
-                        case 2:
-                            break;
-                        case 9:
-                            // Ping.
-                            break;
-                        case 10:
-                            // Pong.
-                            break;
+                    synchronized (this) {
+                        switch (msg) {
+                            case 8:
+                                int errorCode = wsMessageHandler.getErrorCode();
+                                String errorMsg = wsMessageHandler.getTextMessage();
+                                System.out.println("Close websocket reason code: " + Integer.valueOf(errorCode).toString() + ". Error msg ='" + errorMsg + "'");
+                                internalOnclose();
+                                bOpen = false;
+                                break;
+                            case 1:
+                                try {
+                                    String message = wsMessageHandler.getTextMessage();
+                                    internalOnMessage(message);
+                                } catch (Exception ex) {
+                                    MessageGeneralError msgError = new MessageGeneralError(strSessionId, "Exception while processing message", ex.toString());
+                                    wsMessageHandler.sendMessage(msgError.writeOut());
+                                }
+                                break;
+                            case 2:
+                                break;
+                            case 9:
+                                // Ping.
+                                break;
+                            case 10:
+                                // Pong.
+                                break;
+                        }
                     }
-
                 }
             }
         } catch ( Exception ex ) {
@@ -111,62 +115,76 @@ public class ClientConnection extends Thread {
         // 2) subscribe (to a rate)
         // 3) unsubscribe (from a rate)
         // 4) disconnect (quitting the session)
+        String strVerb = "unknown";
         try {
-            MessageTranslator translator = new MessageTranslator();
-            translator.parseInboundMessage(rxMessage);
+            MessageDecoder decoder = new MessageDecoder();
+            decoder.readIn(rxMessage);
+            strVerb = decoder.getVerb();
 
-            if (translator.isConnect()) {
-                System.out.println("Connect message received for user: " + translator.getUsername());
-                String username = translator.getUsername();
-                String password = translator.getPassword();
-                UUID sessionIdent = sessionManager.connect(username, password);
+            if (decoder.isConnect()) {
+                MessageConnect connectMsg = new MessageConnect();
+                connectMsg.readIn(rxMessage);
+                System.out.println("Connect message received for user: " + connectMsg.getUsername());
+                UUID sessionIdent = sessionManager.connect(connectMsg.getUsername(), connectMsg.getPassword(),this);
                 if ( sessionIdent != null ) {
-                    String strSessionId = sessionIdent.toString();
-                    wsMessageHandler.sendMessage(translator.formatConnectResponse(strSessionId, "SUCCESS"));
+                    strSessionId = sessionIdent.toString();
+                    connectMsg.setSessionId(strSessionId);
+                    wsMessageHandler.sendMessage(connectMsg.writeOut());
                 } else {
-                    wsMessageHandler.sendMessage(translator.formatConnectResponse("", "AUTH FAILURE"));
+                    MessageGeneralError errorMsg = new MessageGeneralError("", "AUTH FAILURE", "Username and/or password unknown.");
+                    wsMessageHandler.sendMessage(errorMsg.writeOut());
                 }
 
-            } else if (translator.isSubscribe()) {
-                System.out.println("Subscribe message received for: " + translator.getInstrument() + " - " + translator.getFxPair());
-                String strSessionId = translator.getSessionId();
-                String instr = translator.getInstrument();
-                String fxpair = translator.getFxPair();
+            } else if (decoder.isSubscribe()) {
+                MessageSubscribe subscribeMsg = new MessageSubscribe();
+                subscribeMsg.readIn(rxMessage);
+                System.out.println("Subscribe message received for: " + subscribeMsg.getInstrument() + " - " + subscribeMsg.getFxPair());
+                String instr = subscribeMsg.getInstrument();
+                String fxpair = subscribeMsg.getFxPair();
                 UUID sessionId = UUID.fromString(strSessionId);
                 long result = sessionManager.subscribe(sessionId, instr, fxpair);
                 if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(translator.formatSubscribeResponse(strSessionId, "SUCCESS"));
+                    wsMessageHandler.sendMessage(subscribeMsg.writeOut());
                 } else {
-                    wsMessageHandler.sendMessage(translator.formatSubscribeResponse(strSessionId, "SESSION NOT RECOGNISED"));
+                    MessageGeneralError errorMsg = new MessageGeneralError(subscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                    wsMessageHandler.sendMessage(errorMsg.writeOut());
                 }
 
-            } else if (translator.isUnsubscribe()) {
+            } else if (decoder.isUnsubscribe()) {
+                MessageUnsubscribe unsubscribeMsg = new MessageUnsubscribe();
+                unsubscribeMsg.readIn(rxMessage);
                 System.out.println("Unsubscribe message received.");
-                String strSessionId = translator.getSessionId();
-                String instr = translator.getInstrument();
-                String fxpair = translator.getFxPair();
+                String instr = unsubscribeMsg.getInstrument();
+                String fxpair = unsubscribeMsg.getFxPair();
                 UUID sessionId = UUID.fromString(strSessionId);
                 long result = sessionManager.unsubscribe(sessionId, instr, fxpair);
                 if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(translator.formatUnsubscribeResponse(strSessionId, "SUCCESS"));
+                    wsMessageHandler.sendMessage(unsubscribeMsg.writeOut());
                 } else {
-                    wsMessageHandler.sendMessage(translator.formatUnsubscribeResponse(strSessionId, "SESSION NOT RECOGNISED"));
+                    MessageGeneralError errorMsg = new MessageGeneralError(unsubscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                    wsMessageHandler.sendMessage(errorMsg.writeOut());
                 }
 
-            } else if (translator.isDisconnect()) {
+            } else if (decoder.isDisconnect()) {
+                MessageDisconnect disconnectMsg = new MessageDisconnect();
+                disconnectMsg.readIn(rxMessage);
                 System.out.println("Disconnect message received.");
-                String strSessionId = translator.getSessionId();
                 UUID sessionId = UUID.fromString(strSessionId);
                 long result = sessionManager.disconnect(sessionId);
                 if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(translator.formatDisconnectResponse(strSessionId, "SUCCESS"));
+                    wsMessageHandler.sendMessage(disconnectMsg.writeOut());
                 } else {
-                    wsMessageHandler.sendMessage(translator.formatDisconnectResponse(strSessionId, "SESSION NOT RECOGNISED"));
+                    MessageGeneralError errorMsg = new MessageGeneralError(disconnectMsg.params.sessionid, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                    wsMessageHandler.sendMessage(errorMsg.writeOut());
                 }
 
             }
         } catch (ParseException pEx) {
-            wsMessageHandler.sendMessage(MessageTranslator.formatGeneralError("PAYLOAD MALFORMED", pEx.toString()));
+            MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", pEx.toString());
+            wsMessageHandler.sendMessage( errorMsg.writeOut() );
+        } catch (JsonSerializerException jsEx) {
+            MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", jsEx.toString());
+            wsMessageHandler.sendMessage( errorMsg.writeOut() );
         }
 
         // Now let the listener(s) know about this message.
@@ -176,7 +194,7 @@ public class ClientConnection extends Thread {
     public void internalOnclose() {
         try {
             connection.close();
-            eventListener.onConnectionClosed((ClientEventListener)eventListener);
+            eventListener.onConnectionClosed(this);
         } catch (java.io.IOException ioEx) {
             System.out.println( "Error closing connection with client! " + ioEx.toString());
         }
@@ -212,5 +230,13 @@ public class ClientConnection extends Thread {
         //response.add( "Sec-WebSocket-Extensions: x-webkit-deflate-frame");
 
         return response;
+    }
+
+    @Override
+    public void rateUpdated(RateObject rateObj) {
+        synchronized (this) {
+            MessageRateUpdate updateMsg = new MessageRateUpdate(strSessionId, rateObj.getInstrument(), rateObj.getFxPair(), rateObj.getPrice());
+            wsMessageHandler.sendMessage(updateMsg.writeOut());
+        }
     }
 }

@@ -5,6 +5,6 @@ package uk.co.eskabe.RateServer;
  */
 public interface ClientEventListener {
     public void onMessage(String rxMessage);
-    public void onConnectionClosed(ClientEventListener listener);
+    public void onConnectionClosed(ClientConnection connector);
 }
 
