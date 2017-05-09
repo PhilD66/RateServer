@@ -55,6 +55,9 @@ public class RateServerTest extends TestCase {
             System.out.println("Prepping to run a series of client tests messaging the server...");
             rateClient.run(6789);
 
+            // Once the 'run' thread of RateCLient terminates we can shutdown its receiverThread.
+            rateClient.terminate();
+
             System.out.println("All looks good.");
             runsOK = true;
         } catch (Exception ex) {

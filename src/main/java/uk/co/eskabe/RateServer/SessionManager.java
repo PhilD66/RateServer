@@ -46,7 +46,9 @@ public class SessionManager {
     public long subscribe( UUID sessionHandle, String instrument, String fxPair ) {
         SessionObject thisSession = sessionTable.get(sessionHandle);
         if ( thisSession != null ) {
-            rateEventEngine.addListener(RateObject.makeRateObjectDefinition(instrument, fxPair), thisSession.getRateUpdateListener());
+            if ( rateEventEngine != null ) {
+                rateEventEngine.addListener(RateObject.makeRateObjectDefinition(instrument, fxPair), thisSession.getRateUpdateListener());
+            }
             return 1;
         } else {
             return -1;
@@ -56,7 +58,9 @@ public class SessionManager {
     public long unsubscribe( UUID sessionHandle, String instrument, String fxPair ) {
         SessionObject thisSession = sessionTable.get(sessionHandle);
         if ( thisSession != null ) {
-            rateEventEngine.removeListener(RateObject.makeRateObjectDefinition(instrument, fxPair), thisSession.getRateUpdateListener());
+            if ( rateEventEngine != null ) {
+                rateEventEngine.removeListener(RateObject.makeRateObjectDefinition(instrument, fxPair), thisSession.getRateUpdateListener());
+            }
             return 1;
         } else {
             return -1;
