@@ -27,6 +27,8 @@ public class RateClient implements ClientEventListener
     private static int SM_CONNECTED = 1;
     private static int SM_SUBSCRIBED = 2;
 
+    private boolean bKeepAlive = true;
+    private Thread rxThread = null;
     Socket clientSocket = null;
     String strSessionId = "";
     static final int COMPRESSION_NONE = 0;
@@ -52,33 +54,10 @@ public class RateClient implements ClientEventListener
             // Then wait for it to send something back.
             InputStream iStr = clientSocket.getInputStream();
 
-            (new Thread() {
+            (rxThread = new Thread() {
                 public void run() {
-                    String response = extractMessage(iStr);
-                    System.out.println("Received: " + response);
-                    MessageDecoder msgDecoder = new MessageDecoder();
-                    try {
-                        msgDecoder.readIn(response);
-                        if ( msgDecoder.isConnect() ) {
-                            MessageConnect connectResponse = new MessageConnect();
-                            connectResponse.readIn(response);
-                            strSessionId = connectResponse.getSessionId();
-                            stateMachine = SM_CONNECTED;
-                        } else if ( msgDecoder.isSubscribe() ) {
-                            stateMachine = SM_SUBSCRIBED;
-                        } else if ( msgDecoder.isUnsubscribe() ) {
-                            stateMachine = SM_CONNECTED;
-                        } else if ( msgDecoder.isDisconnect() ) {
-                            stateMachine = SM_DISCONNECTED;
-                        } else if ( msgDecoder.isError() ) {
-                            MessageGeneralError errorResponse = new MessageGeneralError();
-                            errorResponse.readIn(response);
-                            System.out.println("Server signals error! Error: " + errorResponse.params.error + " -> " + errorResponse.params.detail);
-                        }
-                    } catch( JsonSerializerException jsEx ) {
-                        System.out.println("JsonSerializerException on message: " + response);
-                    } catch( ParseException pEx ) {
-                        System.out.println("ParseException on message: " + response);
+                    while (bKeepAlive) {
+                        getReceivedMessage(iStr);
                     }
                 }
             }).start();
@@ -90,8 +69,10 @@ public class RateClient implements ClientEventListener
 
 	public void run( int port ) throws Exception {
 
+        InputStream iStr = clientSocket.getInputStream();
+
 	    // Start the thread to read inbound messages.
-        setupToReceiveMessages();
+        // setupToReceiveMessages();
 
         try {
 
@@ -103,6 +84,7 @@ public class RateClient implements ClientEventListener
             sendMessage(strMessage, clientSocket.getOutputStream());
 
             while ( stateMachine != SM_CONNECTED ) {
+                getReceivedMessage(iStr);
                 Thread.sleep(10);
             }
 
@@ -112,6 +94,7 @@ public class RateClient implements ClientEventListener
             sendMessage(strMessage, clientSocket.getOutputStream());
 
             while ( stateMachine != SM_SUBSCRIBED ) {
+                getReceivedMessage(iStr);
                 Thread.sleep(10);
             }
 
@@ -120,6 +103,7 @@ public class RateClient implements ClientEventListener
             sendMessage(strMessage, clientSocket.getOutputStream());
 
             while ( stateMachine == SM_SUBSCRIBED ) {
+                getReceivedMessage(iStr);
                 Thread.sleep(10);
             }
 
@@ -128,6 +112,7 @@ public class RateClient implements ClientEventListener
             sendMessage(strMessage, clientSocket.getOutputStream());
 
             while ( stateMachine == SM_CONNECTED ) {
+                getReceivedMessage(iStr);
                 Thread.sleep(10);
             }
 
@@ -270,7 +255,7 @@ public class RateClient implements ClientEventListener
             System.out.println("IOException: " + ioEx.toString());
         } catch ( Exception ex ) {
             // TBD
-            System.out.println("IOException: " + ex.toString());
+            System.out.println("Exception: " + ex.toString());
         }
     }
 
@@ -452,7 +437,7 @@ public class RateClient implements ClientEventListener
                 message = new String(uncompressedData, offset, resultLength - offset, "UTF-8");
                 System.out.println(message);
             } catch (Throwable thr) {
-                System.out.println("Exception: " + thr.toString());
+                System.out.println("Exception in RateClient: " + thr.toString());
                 return "";
             }
         }
@@ -467,5 +452,48 @@ public class RateClient implements ClientEventListener
 	    frame[2] = (byte)(closeCode >> 8);
 	    frame[3] = (byte)(closeCode);
         streamOut.write(frame, 0, 4);
+    }
+
+    public void terminate() {
+	    bKeepAlive = false;
+	    try {
+            Thread.sleep(100);
+            if ( rxThread != null ) {
+                rxThread.join();
+                rxThread = null;
+            }
+        } catch (InterruptedException iEx) {
+	        System.out.println("InterruptedException in RateCLient: " + iEx.toString());
+        }
+	}
+
+	public int getReceivedMessage(InputStream iStr) {
+        String response = extractMessage(iStr);
+        System.out.println("Received: " + response);
+        MessageDecoder msgDecoder = new MessageDecoder();
+        try {
+            msgDecoder.readIn(response);
+            if (msgDecoder.isConnect()) {
+                MessageConnect connectResponse = new MessageConnect();
+                connectResponse.readIn(response);
+                strSessionId = connectResponse.getSessionId();
+                stateMachine = SM_CONNECTED;
+            } else if (msgDecoder.isSubscribe()) {
+                stateMachine = SM_SUBSCRIBED;
+            } else if (msgDecoder.isUnsubscribe()) {
+                stateMachine = SM_CONNECTED;
+            } else if (msgDecoder.isDisconnect()) {
+                stateMachine = SM_DISCONNECTED;
+            } else if (msgDecoder.isError()) {
+                MessageGeneralError errorResponse = new MessageGeneralError();
+                errorResponse.readIn(response);
+                System.out.println("Server signals error! Error: " + errorResponse.params.error + " -> " + errorResponse.params.detail);
+            }
+        } catch (JsonSerializerException jsEx) {
+            System.out.println("JsonSerializerException on message: " + response);
+        } catch (ParseException pEx) {
+            System.out.println("ParseException on message: " + response);
+        }
+        return stateMachine;
     }
 }
