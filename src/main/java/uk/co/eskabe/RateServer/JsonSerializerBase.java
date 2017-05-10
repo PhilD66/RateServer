@@ -42,7 +42,8 @@ public class JsonSerializerBase {
                             value.getClass() == java.lang.Long.class ||
                             value.getClass() == java.lang.String.class ||
                             value.getClass() == java.lang.Integer.class ||
-                            value.getClass() == java.lang.Boolean.class
+                            value.getClass() == java.lang.Boolean.class ||
+                            value.getClass() == java.lang.Double.class
                             ) {
                         buffer.append("\"" + value + "\"");
                     } else {
@@ -81,7 +82,8 @@ public class JsonSerializerBase {
                                             value.getClass() == java.lang.Long.class ||
                                             value.getClass() == java.lang.String.class ||
                                             value.getClass() == java.lang.Integer.class ||
-                                            value.getClass() == java.lang.Boolean.class
+                                            value.getClass() == java.lang.Boolean.class ||
+                                            value.getClass() == java.lang.Double.class
                                             ) {
                                         buffer.append("\"" + value + "\"");
                                     } else {
@@ -121,7 +123,8 @@ public class JsonSerializerBase {
                         value.getClass() == java.lang.Long.class ||
                         value.getClass() == java.lang.String.class ||
                         value.getClass() == java.lang.Integer.class ||
-                        value.getClass() == java.lang.Boolean.class
+                        value.getClass() == java.lang.Boolean.class ||
+                        value.getClass() == java.lang.Double.class
                         ) {
                 } else {
                 }
@@ -157,6 +160,9 @@ public class JsonSerializerBase {
                             } else if (value.getClass() == java.lang.Boolean.class) {
                                 Boolean newValue = Boolean.valueOf(strNewFieldValue);
                                 fields[i].setBoolean(loadObject, newValue.booleanValue());
+                            } else if (value.getClass() == java.lang.Double.class) {
+                                Double newValue = Double.valueOf(strNewFieldValue);
+                                fields[i].setDouble(loadObject, newValue.doubleValue());
                             } else {
                                 load(value, (JSONObject) jsonInbound.get(fieldName));
                             }

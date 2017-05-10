@@ -110,85 +110,88 @@ public class ClientConnection extends Thread implements RateUpdateListener {
     }
 
     public void internalOnMessage( String rxMessage ) {
-        // An inbound message will be one of the following:
-        // 1) connect (authentication)
-        // 2) subscribe (to a rate)
-        // 3) unsubscribe (from a rate)
-        // 4) disconnect (quitting the session)
-        String strVerb = "unknown";
-        try {
-            MessageDecoder decoder = new MessageDecoder();
-            decoder.readIn(rxMessage);
-            strVerb = decoder.getVerb();
+        synchronized (connection) {
+            // An inbound message will be one of the following:
+            // 1) connect (authentication)
+            // 2) subscribe (to a rate)
+            // 3) unsubscribe (from a rate)
+            // 4) disconnect (quitting the session)
+            String strVerb = "unknown";
+            try {
+                MessageDecoder decoder = new MessageDecoder();
+                decoder.readIn(rxMessage);
+                strVerb = decoder.getVerb();
 
-            if (decoder.isConnect()) {
-                MessageConnect connectMsg = new MessageConnect();
-                connectMsg.readIn(rxMessage);
-                System.out.println("Connect message received for user: " + connectMsg.getUsername());
-                UUID sessionIdent = sessionManager.connect(connectMsg.getUsername(), connectMsg.getPassword(),this);
-                if ( sessionIdent != null ) {
-                    strSessionId = sessionIdent.toString();
-                    connectMsg.setSessionId(strSessionId);
-                    wsMessageHandler.sendMessage(connectMsg.writeOut());
-                } else {
-                    MessageGeneralError errorMsg = new MessageGeneralError("", "AUTH FAILURE", "Username and/or password unknown.");
-                    wsMessageHandler.sendMessage(errorMsg.writeOut());
+                if (decoder.isConnect()) {
+                    MessageConnect connectMsg = new MessageConnect();
+                    connectMsg.readIn(rxMessage);
+                    System.out.println("Connect message received for user: " + connectMsg.getUsername());
+                    UUID sessionIdent = sessionManager.connect(connectMsg.getUsername(), connectMsg.getPassword(), this);
+                    if (sessionIdent != null) {
+                        strSessionId = sessionIdent.toString();
+                        connectMsg.setSessionId(strSessionId);
+                        wsMessageHandler.sendMessage(connectMsg.writeOut());
+                    } else {
+                        MessageGeneralError errorMsg = new MessageGeneralError("", "AUTH FAILURE", "Username and/or password unknown.");
+                        wsMessageHandler.sendMessage(errorMsg.writeOut());
+                    }
+
+                } else if (decoder.isSubscribe()) {
+                    MessageSubscribe subscribeMsg = new MessageSubscribe();
+                    subscribeMsg.readIn(rxMessage);
+                    System.out.println("Subscribe message received for: " + subscribeMsg.getInstrument() + " - " + subscribeMsg.getFxPair());
+                    String instr = subscribeMsg.getInstrument();
+                    String fxpair = subscribeMsg.getFxPair();
+                    UUID sessionId = UUID.fromString(strSessionId);
+                    long result = sessionManager.subscribe(sessionId, instr, fxpair);
+                    if (result == 1) {
+                        wsMessageHandler.sendMessage(subscribeMsg.writeOut());
+                    } else {
+                        MessageGeneralError errorMsg = new MessageGeneralError(subscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                        wsMessageHandler.sendMessage(errorMsg.writeOut());
+                    }
+                    sessionManager.addListener(sessionId, instr, fxpair);
+
+                } else if (decoder.isUnsubscribe()) {
+                    MessageUnsubscribe unsubscribeMsg = new MessageUnsubscribe();
+                    unsubscribeMsg.readIn(rxMessage);
+                    System.out.println("Unsubscribe message received.");
+                    String instr = unsubscribeMsg.getInstrument();
+                    String fxpair = unsubscribeMsg.getFxPair();
+                    UUID sessionId = UUID.fromString(strSessionId);
+                    long result = sessionManager.unsubscribe(sessionId, instr, fxpair);
+                    if (result == 1) {
+                        wsMessageHandler.sendMessage(unsubscribeMsg.writeOut());
+                    } else {
+                        MessageGeneralError errorMsg = new MessageGeneralError(unsubscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                        wsMessageHandler.sendMessage(errorMsg.writeOut());
+                    }
+
+                } else if (decoder.isDisconnect()) {
+                    MessageDisconnect disconnectMsg = new MessageDisconnect();
+                    disconnectMsg.readIn(rxMessage);
+                    System.out.println("Disconnect message received.");
+                    UUID sessionId = UUID.fromString(strSessionId);
+                    long result = sessionManager.disconnect(sessionId);
+                    if (result == 1) {
+                        wsMessageHandler.sendMessage(disconnectMsg.writeOut());
+                    } else {
+                        MessageGeneralError errorMsg = new MessageGeneralError(disconnectMsg.params.sessionid, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
+                        wsMessageHandler.sendMessage(errorMsg.writeOut());
+                    }
+
                 }
-
-            } else if (decoder.isSubscribe()) {
-                MessageSubscribe subscribeMsg = new MessageSubscribe();
-                subscribeMsg.readIn(rxMessage);
-                System.out.println("Subscribe message received for: " + subscribeMsg.getInstrument() + " - " + subscribeMsg.getFxPair());
-                String instr = subscribeMsg.getInstrument();
-                String fxpair = subscribeMsg.getFxPair();
-                UUID sessionId = UUID.fromString(strSessionId);
-                long result = sessionManager.subscribe(sessionId, instr, fxpair);
-                if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(subscribeMsg.writeOut());
-                } else {
-                    MessageGeneralError errorMsg = new MessageGeneralError(subscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
-                    wsMessageHandler.sendMessage(errorMsg.writeOut());
-                }
-
-            } else if (decoder.isUnsubscribe()) {
-                MessageUnsubscribe unsubscribeMsg = new MessageUnsubscribe();
-                unsubscribeMsg.readIn(rxMessage);
-                System.out.println("Unsubscribe message received.");
-                String instr = unsubscribeMsg.getInstrument();
-                String fxpair = unsubscribeMsg.getFxPair();
-                UUID sessionId = UUID.fromString(strSessionId);
-                long result = sessionManager.unsubscribe(sessionId, instr, fxpair);
-                if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(unsubscribeMsg.writeOut());
-                } else {
-                    MessageGeneralError errorMsg = new MessageGeneralError(unsubscribeMsg.params.sessionId, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
-                    wsMessageHandler.sendMessage(errorMsg.writeOut());
-                }
-
-            } else if (decoder.isDisconnect()) {
-                MessageDisconnect disconnectMsg = new MessageDisconnect();
-                disconnectMsg.readIn(rxMessage);
-                System.out.println("Disconnect message received.");
-                UUID sessionId = UUID.fromString(strSessionId);
-                long result = sessionManager.disconnect(sessionId);
-                if ( result == 1 ) {
-                    wsMessageHandler.sendMessage(disconnectMsg.writeOut());
-                } else {
-                    MessageGeneralError errorMsg = new MessageGeneralError(disconnectMsg.params.sessionid, "SESSION NOT RECOGNISED", "Expected " + strSessionId);
-                    wsMessageHandler.sendMessage(errorMsg.writeOut());
-                }
-
+            } catch (ParseException pEx) {
+                MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", pEx.toString());
+                wsMessageHandler.sendMessage(errorMsg.writeOut());
+            } catch (JsonSerializerException jsEx) {
+                MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", jsEx.toString());
+                wsMessageHandler.sendMessage(errorMsg.writeOut());
             }
-        } catch (ParseException pEx) {
-            MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", pEx.toString());
-            wsMessageHandler.sendMessage( errorMsg.writeOut() );
-        } catch (JsonSerializerException jsEx) {
-            MessageGeneralError errorMsg = new MessageGeneralError(strSessionId, "MALFORMED PAYLOAD", jsEx.toString());
-            wsMessageHandler.sendMessage( errorMsg.writeOut() );
-        }
 
-        // Now let the listener(s) know about this message.
-        eventListener.onMessage(rxMessage);
+            // Now let the listener(s) know about this message.
+            eventListener.onMessage(rxMessage);
+        }
     }
 
     public void internalOnclose() {
@@ -234,7 +237,7 @@ public class ClientConnection extends Thread implements RateUpdateListener {
 
     @Override
     public void rateUpdated(RateObject rateObj) {
-        synchronized (this) {
+        synchronized (connection) {
             MessageRateUpdate updateMsg = new MessageRateUpdate(strSessionId, rateObj.getInstrument(), rateObj.getFxPair(), rateObj.getPrice());
             wsMessageHandler.sendMessage(updateMsg.writeOut());
         }

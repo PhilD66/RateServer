@@ -37,16 +37,19 @@ public class RateClient implements ClientEventListener
     protected int compression = COMPRESSION_NONE;
     protected boolean bMask = true;
     private int stateMachine = SM_DISCONNECTED;
+    private int rateUpdateMsgCount = 0;
+    private int port = 6789;
 
-	public RateClient() throws IOException {
-        clientSocket = new Socket("127.0.0.1", 6789);
+	public RateClient(int usePort) throws IOException {
+	    port = usePort;
+        clientSocket = new Socket("127.0.0.1", port);
     }
 
 	public static void main(String argv[]) throws Exception {
 
-		RateClient main = new RateClient();
+		RateClient main = new RateClient(6789);
 
-		main.run(6789 );
+		main.run();
 	}
 
 	public void setupToReceiveMessages() {
@@ -57,64 +60,61 @@ public class RateClient implements ClientEventListener
             (rxThread = new Thread() {
                 public void run() {
                     while (bKeepAlive) {
-                        getReceivedMessage(iStr);
+                        try {
+                            getReceivedMessage(iStr);
+                            Thread.sleep(1);
+                        } catch (SocketException sEx) {
+                            bKeepAlive = false;
+                        } catch (InterruptedException iEx) {
+                            System.out.println("RateClient rxThread interrupted. " + iEx.toString());
+                        }
                     }
                 }
             }).start();
-
-        } catch( IOException ioEx ) {
+        } catch ( IOException ioEx ) {
             System.out.println(ioEx.toString());
         }
     }
 
-	public void run( int port ) throws Exception {
+	public void run() throws Exception {
 
         InputStream iStr = clientSocket.getInputStream();
 
-	    // Start the thread to read inbound messages.
-        // setupToReceiveMessages();
-
         try {
-
+            // These steps are synchronous.
             doHeaderExchange();
+
+            // Now start the thread to read inbound messages asynchronously from the write thread.
+            setupToReceiveMessages();
 
             // Send a connect message to the server.
             MessageConnect msgConnect = new MessageConnect("sauron", "of-mordor");
             String strMessage = msgConnect.writeOut();
             sendMessage(strMessage, clientSocket.getOutputStream());
 
-            while ( stateMachine != SM_CONNECTED ) {
-                getReceivedMessage(iStr);
-                Thread.sleep(10);
-            }
+            waitForState(SM_CONNECTED);
 
             // Now subscribe to an FX rate stream...
             MessageSubscribe msgSubcribe = new MessageSubscribe( strSessionId,"SPOT", "EURGBP");
             strMessage = msgSubcribe.writeOut();
             sendMessage(strMessage, clientSocket.getOutputStream());
 
-            while ( stateMachine != SM_SUBSCRIBED ) {
-                getReceivedMessage(iStr);
-                Thread.sleep(10);
+            waitForState(SM_SUBSCRIBED);
+
+            // Wait for 10 rate update messages...
+            while ( rateUpdateMsgCount < 10 ) {
+                Thread.sleep(5);
             }
 
             MessageUnsubscribe msgUnsubscribe = new MessageUnsubscribe(strSessionId, "SPOT", "EURGBP");
             strMessage = msgUnsubscribe.writeOut();
             sendMessage(strMessage, clientSocket.getOutputStream());
 
-            while ( stateMachine == SM_SUBSCRIBED ) {
-                getReceivedMessage(iStr);
-                Thread.sleep(10);
-            }
-
             MessageDisconnect msgDisconnect = new MessageDisconnect(strSessionId);
             strMessage = msgDisconnect.writeOut();
             sendMessage(strMessage, clientSocket.getOutputStream());
 
-            while ( stateMachine == SM_CONNECTED ) {
-                getReceivedMessage(iStr);
-                Thread.sleep(10);
-            }
+            waitForState(SM_DISCONNECTED);
 
             final int CLOSE_NORMAL = 1000;
             sendSocketClose(clientSocket.getOutputStream(), CLOSE_NORMAL);
@@ -125,6 +125,12 @@ public class RateClient implements ClientEventListener
 	        System.out.println(ioEx.toString());
         }
 	}
+
+	protected void waitForState( int requiredState ) throws InterruptedException {
+        while ( stateMachine != requiredState ) {
+            Thread.sleep(5);
+        }
+    }
 
 	public void doHeaderExchange() throws IOException {
         BufferedWriter outToClient =
@@ -166,6 +172,7 @@ public class RateClient implements ClientEventListener
             }
         }
 
+        System.out.println("Header exchange done.");
     }
 
 	public void onMessage( String rxMessage ) {
@@ -196,11 +203,13 @@ public class RateClient implements ClientEventListener
                 case COMPRESSION_DEFLATE:
                     // Fill the payload using Deflate compression.
                     actualPayloadLength = deflateMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
-                    break;
+                    throw new Exception("ZIPPED!");
+                    //break;
                 case COMPRESSION_GZIP:
                     // Fill the payload using GZIP compression.
                     actualPayloadLength = gzipMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
-                    break;
+                    throw new Exception("ZIPPED!");
+                    //break;
                 default:
                     // Assume no compression.
                     actualPayloadLength = copyMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
@@ -302,7 +311,7 @@ public class RateClient implements ClientEventListener
         }
     }
 
-    protected String extractMessage(InputStream rawIn) {
+    protected synchronized String extractMessage(InputStream rawIn) throws SocketException {
         boolean bOpen = true;
         String message = "";
 
@@ -323,6 +332,9 @@ public class RateClient implements ClientEventListener
         } catch (IOException ioEx) {
             return "";
         }
+
+        printBytesNicely("FIRST 2 RAW BYTES", buffer, 0, 2);
+
         if (chunk == 2) {
             lengthCode = (0x7F & buffer[1]);
             opcode = (byte) (0x0F & buffer[0]);
@@ -348,7 +360,7 @@ public class RateClient implements ClientEventListener
             // throw new Exception("Unhandled scenario! Insufficient bytes read to decode frame header.");
             System.out.println("Unexpected byte count. Closing socket.");
             // close(); ****************  Need to call this.
-            return "";
+            throw new SocketException("Socket closing.");
         }
 
         if (lengthCode == 0) {
@@ -385,7 +397,7 @@ public class RateClient implements ClientEventListener
                 return "";
             }
 
-            // Now we know what length of message to expect we can allocate a buffer for it, allowing for 2:1 compression.
+            // Now we know what length of message to expect we can allocate a buffer for it.
             if (messageBuffer == null) {
                 System.out.println("Creating buffer for message of total length = " + String.valueOf(payloadSize));
                 // The below won't work if the payload is > 2^31. Assume unlikely for now.
@@ -467,7 +479,7 @@ public class RateClient implements ClientEventListener
         }
 	}
 
-	public int getReceivedMessage(InputStream iStr) {
+	public int getReceivedMessage(InputStream iStr) throws SocketException {
         String response = extractMessage(iStr);
         System.out.println("Received: " + response);
         MessageDecoder msgDecoder = new MessageDecoder();
@@ -482,6 +494,9 @@ public class RateClient implements ClientEventListener
                 stateMachine = SM_SUBSCRIBED;
             } else if (msgDecoder.isUnsubscribe()) {
                 stateMachine = SM_CONNECTED;
+            } else if (msgDecoder.isRateUpdate()) {
+                // No change. Simply receiving updates.
+                rateUpdateMsgCount += 1;
             } else if (msgDecoder.isDisconnect()) {
                 stateMachine = SM_DISCONNECTED;
             } else if (msgDecoder.isError()) {
@@ -495,5 +510,34 @@ public class RateClient implements ClientEventListener
             System.out.println("ParseException on message: " + response);
         }
         return stateMachine;
+    }
+
+    public void printBytesNicely(String preamble, byte[] buffer, int start, int length) {
+
+	    byte outBuffer[] = new byte[1024];
+	    int outPos = 0;
+
+	    for ( int count = 0; count < length; count++) {
+	        byte byteOne = (byte)((0xF0 & buffer[start + count]) >> 4);
+            byte byteTwo = (byte)(0x0F & buffer[start + count]);
+            if ( byteOne < 10 ) {
+                outBuffer[outPos++] = (byte) (48 + byteOne);
+            } else {
+                outBuffer[outPos++] = (byte) (65 + byteOne);
+            }
+            if ( byteTwo < 10 ) {
+                outBuffer[outPos++] = (byte) (48 + byteTwo);
+            } else {
+                outBuffer[outPos++] = (byte) (65 + byteTwo);
+            }
+        }
+
+        try {
+            String outStr = new String(outBuffer, "ASCII");
+            System.out.println(preamble + ": " + outStr);
+        } catch (UnsupportedEncodingException ueEx) {
+            System.out.println("Unsupported coding exception!");
+
+        }
     }
 }

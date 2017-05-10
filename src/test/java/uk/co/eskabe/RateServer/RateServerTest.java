@@ -42,7 +42,7 @@ public class RateServerTest extends TestCase {
             (new Thread() {
                 public void run() {
                     try {
-                        rateServer.run(6789);
+                        rateServer.run(7788);
                     } catch (Exception ex) {
                         System.out.println("Serious exception encountered launching the server: " + ex.toString());
                         assertTrue(false);
@@ -50,10 +50,10 @@ public class RateServerTest extends TestCase {
                 }
             }).start();
 
-            RateClient rateClient = new RateClient();
+            RateClient rateClient = new RateClient(7788);
 
             System.out.println("Prepping to run a series of client tests messaging the server...");
-            rateClient.run(6789);
+            rateClient.run();
 
             // Once the 'run' thread of RateCLient terminates we can shutdown its receiverThread.
             rateClient.terminate();

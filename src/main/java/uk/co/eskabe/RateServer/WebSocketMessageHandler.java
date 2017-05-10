@@ -19,7 +19,8 @@ public class WebSocketMessageHandler {
     public int payloadLength = 0;
     public byte[] maskBytes = new byte[4];
     public boolean bIsText = false;
-    public boolean bMask = false;
+    public boolean bInboundMask = false;
+    public boolean bOutboundMask = false;
     public boolean bCompressionRequested = false;
     static final int COMPRESSION_NONE = 0;
     static final int COMPRESSION_DEFLATE = 1;
@@ -47,7 +48,7 @@ public class WebSocketMessageHandler {
         int lengthCode = (0x7F & buffer[1]);
         byte opcode = (byte) (0x0F & buffer[0]);
         bInboundIsCompressed = (0x40 & buffer[0]) == 0x40;
-        bMask = ((0x80 & buffer[1]) != 0);
+        bInboundMask = ((0x80 & buffer[1]) != 0);
 
         switch( opcode ) {
             case 0x0:
@@ -89,7 +90,7 @@ public class WebSocketMessageHandler {
                 break;
         }
 
-        if (bMask) {
+        if (bInboundMask) {
             bytesRead = inputStream.read(maskBytes, 0, 4);
         }
 
@@ -115,7 +116,7 @@ public class WebSocketMessageHandler {
             offset += len;
         }
 
-        if (bMask) {
+        if (bInboundMask) {
             int oct = 0;
             for (int mbyte = 0; mbyte < payloadLength; mbyte++) {
                 payloadBuffer[mbyte] = (byte) (payloadBuffer[mbyte] ^ maskBytes[oct % 4]);
@@ -180,11 +181,13 @@ public class WebSocketMessageHandler {
                 case COMPRESSION_DEFLATE:
                     // Fill the payload using Deflate compression.
                     actualPayloadLength = deflateMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
-                    break;
+                    throw new Exception( "Server is unexpectedly compressing outbound message!");
+                    //break;
                 case COMPRESSION_GZIP:
                     // Fill the payload using GZIP compression.
                     actualPayloadLength = gzipMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
-                    break;
+                    throw new Exception( "Server is unexpectedly compressing outbound message!");
+                    //break;
                 default:
                     // Assume no compression.
                     actualPayloadLength = copyMessageToPayload( rawMsg, payload, maxHeaderLength, rawMsg.length);
@@ -193,7 +196,7 @@ public class WebSocketMessageHandler {
 
             int headerLength = 0;
             byte maskByteCode = 0;
-            if ( bMask ) {
+            if ( bOutboundMask ) {
                 headerLength = 4;
                 maskByteCode = (byte)0x80;
             }
@@ -220,7 +223,7 @@ public class WebSocketMessageHandler {
                 throw new Exception("Uncoded handling for large messages!");
             }
 
-            if ( bMask ) {
+            if ( bOutboundMask ) {
                 int random = (int)(2000000000 * Math.random());
                 byte mask[] = new byte[4];
                 for (int maskbyte = 0; maskbyte < 4; maskbyte++) {
@@ -228,8 +231,12 @@ public class WebSocketMessageHandler {
                     payload[maxHeaderLength - 4 + maskbyte] = mask[maskbyte];
                 }
                 maskMessagePayload(mask, payload, maxHeaderLength, actualPayloadLength);
+                throw new Exception( "Mask incorrectly set to TRUE on outbound server message!");
             }
 
+            if ( payload[maxHeaderLength - headerLength] != (byte)0x81 ) {
+                System.out.println("#######  Server outbound header error! #######");
+            }
             outputStream.write(payload, maxHeaderLength - headerLength, actualPayloadLength + headerLength);
 
             // Not necessary: streamOut.flush();
@@ -239,7 +246,7 @@ public class WebSocketMessageHandler {
             System.out.println("IOException: " + ioEx.toString());
         } catch ( Exception ex ) {
             // TBD
-            System.out.println("IOException: " + ex.toString());
+            System.out.println("Exception: " + ex.toString());
         }
     }
 

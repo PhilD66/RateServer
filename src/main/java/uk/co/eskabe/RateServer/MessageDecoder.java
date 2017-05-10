@@ -26,6 +26,10 @@ public class MessageDecoder extends MessageBase {
         return (verb != null) && (verb.compareToIgnoreCase("disconnect") == 0);
     }
 
+    public boolean isRateUpdate() {
+        return (verb != null) && (verb.compareToIgnoreCase("update") == 0);
+    }
+
     public boolean isError() {
         return (verb != null) && (verb.compareToIgnoreCase("error") == 0);
     }

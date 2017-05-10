@@ -101,7 +101,7 @@ public class RateEventEngine extends Thread {
     public void run() {
         System.out.println("RateEventEngine started to create price updates.");
         while ( keepRunning ) {
-            // updatePrices();
+            updatePrices();
             try {
                 Thread.sleep(updateIntervalMs);
             } catch(InterruptedException intEx) {
